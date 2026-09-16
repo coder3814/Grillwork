@@ -1,0 +1,201 @@
+"""Fetching the engine an update is updating *to*.
+
+An installed Grillwork is a copy of `engine/` with no line back to where it came from, so
+updating it used to mean the person cloning the source themselves and naming the path. This
+module is that missing line: the repo records its source in `config.json`, and `fetch-engine`
+downloads that source's archive and stages it for the update prompt to read.
+
+**Staging is all this does.** It never writes into `.grillwork/`. The replacing and the
+command realization stay where they belong — in the fetched `INSTALL.md`, which travels with
+the engine being updated to and is therefore always the version that knows what its own update
+involves. A copy of that procedure here would be the version being updated *away from*.
+
+Standard library alone (`urllib`, `zipfile`), like the rest of this package: it is vendored
+into the adopter's repo and can carry no dependency they would have to install.
+"""
+
+from __future__ import annotations
+
+import re
+import shutil
+import subprocess
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
+from pathlib import Path
+
+# Where an install with no recorded source came from. Installs predate the `source` setting,
+# and asking their owner to supply a URL is the friction this module exists to remove — so the
+# canonical repo is the fallback rather than a refusal. Every command that uses it prints the
+# source it resolved, so an adopter who installed from a fork can see that it is not theirs.
+DEFAULT_REPO = "https://github.com/coder3814/Grillwork"
+DEFAULT_REF = "main"
+
+# An https GitHub-style `owner/repo` URL. Narrow on purpose: the value is interpolated into a
+# download URL, so `file://`, `http://` and path tricks are refused rather than normalized.
+_REPO_RE = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/?$")
+# Branches, tags and commit SHAs alike. No `..`, no leading dash, nothing shell-shaped.
+_REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+
+# What proves an extracted archive is a Grillwork source rather than some other zip: the engine
+# to copy, and the prompt that says how to copy it.
+_MARKERS = ("engine", "INSTALL.md")
+
+# Excluded from the currency comparison. `commands/` is realized into the harness's own layout
+# rather than copied, so it is never byte-identical to its source; `__pycache__` is generated
+# and was never installed in the first place.
+_COMPARE_EXCLUDED = {"commands", "__pycache__"}
+
+
+class SourceError(Exception):
+    """Raised when a source cannot be validated, reached, or trusted."""
+
+
+def archive_url(repo: str, ref: str) -> str:
+    """The download URL for ``ref`` of ``repo``.
+
+    The generic `/archive/<ref>.zip` form resolves branches, tags and commit SHAs alike, so
+    there is nothing to interrogate about which kind of ref was named.
+    """
+    if not _REPO_RE.match(repo):
+        raise SourceError(
+            f"Not a usable source repository URL: {repo!r}. "
+            "Expected an https URL of the form https://<host>/<owner>/<repo>."
+        )
+    if not _REF_RE.match(ref):
+        raise SourceError(f"Not a usable ref: {ref!r}.")
+    return f"{repo.rstrip('/')}/archive/{ref}.zip"
+
+
+def require_clean_tree(root: Path) -> None:
+    """Refuse unless ``root`` is a git repo with nothing uncommitted.
+
+    An update replaces the engine wholesale and keeps no backup, because git *is* the backup.
+    That only holds if there is a commit to return to and nothing of the person's own mixed
+    into the diff it produces.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as e:
+        raise SourceError(f"git could not be run, and an update needs it as its undo: {e}") from e
+    if proc.returncode != 0:
+        raise SourceError(
+            "Not a git repository. An update keeps no backup because git is the undo, "
+            "so it will not run without one."
+        )
+    if proc.stdout.strip():
+        raise SourceError(
+            "The git working tree is not clean. Commit your changes first — an update keeps "
+            "no backup, and a clean tree is what makes the resulting diff reviewable."
+        )
+
+
+def fetch(repo: str, ref: str, archive: Path | None = None) -> tuple[Path, Path, str]:
+    """Download (or read) a Grillwork source archive and extract it.
+
+    Returns three things: the staging directory, which is the whole of what was created and the
+    one path to delete when the update is finished; the source root inside it, the directory
+    holding `engine/` and `INSTALL.md`; and the origin it came from, for reporting.
+
+    Staging lives in a temp directory *outside* the repo, so a staged update can never be
+    mistaken for repo content or committed by accident. It deliberately outlives this call —
+    the update copies from it — so removing it is the caller's, and the whole of it is named
+    in the output for exactly that reason.
+
+    ``archive`` reads a local zip instead of downloading, which is how an offline machine and
+    the test suite exercise this path.
+    """
+    staging = Path(tempfile.mkdtemp(prefix="grillwork-update-"))
+    try:
+        if archive is not None:
+            zip_path = Path(archive)
+            if not zip_path.is_file():
+                raise SourceError(f"No such archive: {zip_path}")
+            origin = str(zip_path.resolve())
+        else:
+            origin = archive_url(repo, ref)
+            zip_path = staging / "source.zip"
+            try:
+                with urllib.request.urlopen(origin) as response, zip_path.open("wb") as out:
+                    shutil.copyfileobj(response, out)
+            except (urllib.error.URLError, OSError) as e:
+                raise SourceError(f"Could not download {origin}: {e}") from e
+
+        extracted = staging / "source"
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(extracted)
+        except (zipfile.BadZipFile, OSError) as e:
+            raise SourceError(f"{origin} is not a readable zip archive: {e}") from e
+
+        return staging, _source_root(extracted, origin), origin
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _source_root(extracted: Path, origin: str) -> Path:
+    """Find the one directory in ``extracted`` that is a Grillwork source.
+
+    A GitHub archive wraps everything in a single `<repo>-<ref>/` directory, but nothing
+    guarantees that, so the shape is verified rather than assumed: exactly one directory
+    carrying both markers. Zero means the archive is not Grillwork; more than one means it is
+    something whose layout this cannot reason about. Both refuse before anything is replaced.
+    """
+    candidates = [
+        d
+        for d in (extracted, *(p for p in extracted.rglob("*") if p.is_dir()))
+        if all((d / marker).exists() for marker in _MARKERS)
+    ]
+    if len(candidates) != 1:
+        raise SourceError(
+            f"{origin} does not look like a Grillwork source: expected exactly one directory "
+            f"holding {' and '.join(_MARKERS)}, found {len(candidates)}."
+        )
+    return candidates[0]
+
+
+def compare_engines(installed: Path, staged: Path) -> list[str]:
+    """Paths under the engine that differ between what is installed and what was fetched.
+
+    This is the directory comparison `INSTALL.md` documents, done without needing a checkout
+    on disk: everything installed is committed and byte-identical to its source, so an empty
+    result means the repo is already current and there is nothing for an update to do.
+
+    Line endings are normalized before comparing. A GitHub archive ships LF, while a Windows
+    checkout with `core.autocrlf` on holds the same bytes as CRLF — so a byte comparison calls
+    every file on such a machine drift, and the "already current, stop" answer would never fire
+    there. Git treats these files as text and so does this.
+    """
+    differing: list[str] = []
+    _walk_diff(installed, staged, Path(), differing)
+    return sorted(differing)
+
+
+def _walk_diff(left: Path, right: Path, prefix: Path, out: list[str]) -> None:
+    names = {
+        p.name
+        for parent in (left, right)
+        if parent.is_dir()
+        for p in parent.iterdir()
+        if p.name not in _COMPARE_EXCLUDED
+    }
+    for name in names:
+        lhs, rhs, rel = left / name, right / name, prefix / name
+        if lhs.is_dir() and rhs.is_dir():
+            _walk_diff(lhs, rhs, rel, out)
+        elif lhs.is_file() and rhs.is_file():
+            if _normalized(lhs) != _normalized(rhs):
+                out.append(rel.as_posix())
+        else:
+            out.append(rel.as_posix())
+
+
+def _normalized(path: Path) -> bytes:
+    """A file's bytes with CRLF folded to LF — see `compare_engines`."""
+    return path.read_bytes().replace(b"\r\n", b"\n")

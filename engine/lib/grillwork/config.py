@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import source
+
 
 class ConfigError(Exception):
     """Raised when no valid Grillwork config can be loaded."""
@@ -33,6 +35,11 @@ class Config:
     # / `push: false`, today's behavior exactly.
     evidence_commit: bool = True
     evidence_push: bool = False
+    # Where this install came from, so an update needs no argument. An absent `source:`
+    # section falls back to the canonical repo rather than refusing: installs predate this
+    # setting, and they are the ones an update helps most.
+    source_repo: str = source.DEFAULT_REPO
+    source_ref: str = source.DEFAULT_REF
 
     @property
     def spec_home_path(self) -> Path:
@@ -83,6 +90,9 @@ def load(start: Path) -> Config:
         evidence = {}
     commit = evidence.get("commit")
     push = evidence.get("push")
+    src = data.get("source")
+    if not isinstance(src, dict):
+        src = {}
     return Config(
         root=root,
         spec_home=str(data["spec_home"]),
@@ -92,4 +102,6 @@ def load(start: Path) -> Config:
         hooks=dict(hooks) if isinstance(hooks, dict) else {},
         evidence_commit=True if commit is None else bool(commit),
         evidence_push=False if push is None else bool(push),
+        source_repo=str(src.get("repo") or source.DEFAULT_REPO),
+        source_ref=str(src.get("ref") or source.DEFAULT_REF),
     )

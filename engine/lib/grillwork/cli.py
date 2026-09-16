@@ -17,7 +17,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import config, evidence, hooks, naming, package, spec
+from . import config, evidence, hooks, naming, package, source, spec
 
 # Every error kind a command can expect to hit: a bad/absent config, the filesystem, and the
 # domain's own rejections (`naming.set_status` raises ValueError on an unknown status). One
@@ -25,6 +25,7 @@ from . import config, evidence, hooks, naming, package, spec
 # `_clean_exit` rather than by remembering to.
 _EXPECTED_ERRORS = (
     config.ConfigError,
+    source.SourceError,
     FileNotFoundError,
     FileExistsError,
     ValueError,
@@ -102,6 +103,8 @@ def _cmd_config(args: argparse.Namespace) -> None:
                 "gate": cfg.gate,
                 "integration_target": cfg.integration_target,
                 "improvements": str(cfg.improvements_path),
+                "source_repo": cfg.source_repo,
+                "source_ref": cfg.source_ref,
             }
         )
 
@@ -204,6 +207,41 @@ def _cmd_markers(args: argparse.Namespace) -> None:
         )
 
 
+def _cmd_fetch_engine(args: argparse.Namespace) -> None:
+    """Download the recorded source and stage it for the update prompt to read.
+
+    This writes nothing into `.grillwork/`. It answers the two questions an update could not
+    answer for itself — where the source is, and whether the repo is already current — and
+    leaves the replacing to the `INSTALL.md` it just staged, which is the version that knows
+    what its own update involves.
+    """
+    with _clean_exit():
+        cfg = config.load(args.path)
+        source.require_clean_tree(cfg.root)
+        repo = args.repo or cfg.source_repo
+        ref = args.ref or cfg.source_ref
+        archive = Path(args.archive) if args.archive else None
+        staging, src, origin = source.fetch(repo, ref, archive)
+        differing = source.compare_engines(
+            cfg.root / ".grillwork" / "engine", src / "engine"
+        )
+        _emit(
+            {
+                "origin": origin,
+                "repo": repo,
+                "ref": ref,
+                # `staged` is the whole temp directory — delete it when the update is done.
+                # `source` is the Grillwork tree inside it that the update copies from.
+                "staged": str(staging),
+                "source": str(src),
+                "engine": str(src / "engine"),
+                "install_doc": str(src / "INSTALL.md"),
+                "current": not differing,
+                "differing": differing,
+            }
+        )
+
+
 def _cmd_fire_hooks(args: argparse.Namespace) -> None:
     """Dry-run an event's bound hooks: one line per hook, spawned or not.
 
@@ -302,6 +340,16 @@ def build_parser() -> argparse.ArgumentParser:
         add("markers", _cmd_markers, "Print the open [GAP] markers in a spec file."),
         "A spec file to scan for open [GAP] markers.",
     )
+
+    sub = add(
+        "fetch-engine",
+        _cmd_fetch_engine,
+        "Download this install's source and stage it for an update; report whether it differs.",
+    )
+    sub.add_argument("--repo", default=None, help="Override the source repository URL.")
+    sub.add_argument("--ref", default=None, help="Override the branch, tag or commit to fetch.")
+    sub.add_argument("--archive", default=None, help="Read a local zip instead of downloading.")
+    with_path(sub)
 
     sub = add("fire-hooks", _cmd_fire_hooks, "Dry-run the hooks bound to a lifecycle event.")
     sub.add_argument("event", help="The lifecycle event whose bound hooks to spawn.")

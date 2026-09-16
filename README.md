@@ -133,7 +133,7 @@ and `/grillwork-close` to finish a change left `accepted` but unpublished. Each 
 of the run it belongs to; none of them is a rung you are expected to climb by hand.
 
 Two more are **maintenance**, touching the installation rather than any spec —
-`/grillwork-upgrade <source>` updates the engine to a newer version without re-asking a single
+`/grillwork-upgrade` updates the engine to a newer version without re-asking a single
 question the first install already settled, and `/grillwork-uninstall` removes Grillwork
 altogether, deleting the engine and the commands while asking before it goes near your specs or
 settings.
@@ -277,8 +277,12 @@ in whatever form your harness reads. Nothing goes on your `PATH`, no package is 
 every file it writes is identical on every machine, so you commit them and a colleague's fresh
 clone has the loops without an install step.
 
-Re-running the same prompt is how you update: the method is re-copied wholesale, and your
-specs, findings, and settings are left alone.
+Updating is one command — `/grillwork-upgrade`, with nothing after it. The repo records where
+its Grillwork came from, so the command fetches that source itself, replaces the method
+wholesale, and leaves your specs, findings, and settings alone. It insists on a clean git tree
+and keeps no backup of what it replaced, because git is the undo; what you get back is an
+uncommitted diff to review. Re-running the install prompt by hand does the same thing and
+always has — the command only saves you finding the source first.
 
 ## Quickstart
 
