@@ -103,6 +103,24 @@ spec: every question it is forced to ask, and every refinement you make once you
 the result, marks a place the interrogation didn't dig deep enough. Grillwork records those, and
 the Curator distills them into questions the Griller asks **up front on the next spec**.
 
+```mermaid
+flowchart LR
+    G["grilling"] --> S[/"the spec"/]
+    S --> BUILD["the build"]
+    BUILD -- "every question<br/>it had to ask" --> F[/"findings.md<br/>one per spec"/]
+    YOU(["you, judging the result"]) -- "every refinement<br/>you make once you can see it" --> F
+    F --> CU["Curator"]
+    CU --> I[/"improvements.md<br/>curated, cross-spec"/]
+    I -- "asked up front next time" --> G
+
+    classDef human fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#1f2937
+    classDef author fill:#e0e7ff,stroke:#4338ca,color:#1f2937
+    classDef artifact fill:#d1fae5,stroke:#047857,color:#1f2937
+    class YOU human
+    class G,BUILD,CU author
+    class S,F,I artifact
+```
+
 So the real output is not any single spec — it is an interrogation that gets sharper each time it
 runs. You shape the spec and judge the result; the process learns to need less of both. This is
 not aspirational: a gap found during an early build already became a recorded finding, then a
