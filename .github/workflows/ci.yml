@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Both, deliberately: the suite is developed on Windows but must not assume it — a
+    # `Path("C:/...")` literal is silently relative on POSIX, which is exactly the class of
+    # bug a Windows-only CI would never see.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        # Pinned exactly: setup-uv publishes point tags but no floating `v8` major tag, so
+        # `@v8` does not resolve. Bump this deliberately.
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10 # the floor declared in pyproject
+
+      - name: Run the test suite
+        run: uv run --python 3.10 pytest -q
+
+      - name: The suite must leave the worktree clean
+        # A fresh clone must not dirty itself by running its own tests. Every fixture install
+        # and every spec the suite writes belongs in a temp directory, and this is what keeps
+        # it that way — the working tree is authoring material only.
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::pytest modified tracked files — the suite must be read-only."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
+          echo "worktree clean after pytest"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        # Pinned exactly: setup-uv publishes point tags but no floating `v8` major tag, so
+        # `@v8` does not resolve. Bump this deliberately.
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+      - name: ruff
+        run: uv run ruff check .

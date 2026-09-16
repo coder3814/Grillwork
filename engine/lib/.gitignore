@@ -1,0 +1,6 @@
+# Bytecode Python writes beside the helper when it runs. It is *generated*, never
+# *installed*: it embeds the absolute path it was compiled from, so committing it would
+# put machine-specific bytes into an install whose whole premise is that every byte is
+# identical everywhere. This file ships with the engine so that premise holds in the
+# adopter's repo too, whatever their own ignore rules happen to be.
+__pycache__/

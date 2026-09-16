@@ -1,0 +1,50 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Environment & secrets
+.env
+.env.*
+*.local
+
+# Logs & temp
+*.log
+tmp/
+temp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Nothing Grillwork-shaped is ignored here, because nothing Grillwork-shaped belongs here: this
+# repo authors the engine (engine/) and is deliberately not an adopter of it, so there is no
+# .grillwork/ install to have an opinion about.
+
+# Playwright MCP browser-session artifacts (tooling scratch, not project data)
+.playwright-mcp/
+
+# Local authoring layer. This repo is a component: what it carries is what an adopter installs.
+# The notes and harness config used to *build* Grillwork stay on the machine that builds it.
+# CLAUDE.md in particular governs work in the repo it sits in — and no one works in this one,
+# they install from it — so shipping one would only compete with the adopter's own.
+CLAUDE.md
+.claude/
+
+# Design docs, rationale and the authoring archive. These explain and justify the method to
+# whoever is editing it; nothing installed reads them and no adopter needs them. They stay on
+# the authoring machine so the public repo carries the method, not the argument for it.
+docs/

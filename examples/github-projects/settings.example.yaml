@@ -1,0 +1,29 @@
+# The GitHub Projects harness's own settings. Copy to `settings.yaml` and edit.
+# Nothing here belongs in `.grillwork/settings/config.yaml`: the engine names no tracker.
+# Every key is overridable by the matching GRILLWORK_GH_* environment variable
+# (GRILLWORK_GH_OWNER, GRILLWORK_GH_PROJECT_NUMBER, ...), so CI can bind without a file.
+
+# Blank owner/repo default from the repo's git `origin` remote.
+owner: ""
+repo: ""
+
+# The Projects v2 board. Either the number, or a project_url the owner+number parse out of.
+project_number: "2"
+project_url: ""
+
+# The branch a Ready spec's link points at (blank -> GitHub's default branch).
+integration_target: ""
+
+# The single-select field on the board this sync writes, and the column each lifecycle stage
+# appears in. Run `python hook.py --check` to list the board's fields and options, and to
+# verify these names are really there. Several stages may share a column; unmapped columns are
+# never touched. The issue CLOSES at the `closed` stage regardless of column.
+status_field: Status
+status_map:
+  drafting: Todo
+  ready: Todo
+  approved: Todo
+  building: In Progress
+  verified: In Progress
+  accepted: Done
+  closed: Done

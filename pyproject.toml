@@ -1,0 +1,40 @@
+# Grillwork is not a distributed package: the method (roles, definitions, template,
+# commands) and the deterministic helper under `engine/lib/grillwork/` are *copied* into an
+# adopter's repository by the install prompt in INSTALL.md and run in place with the
+# standard library alone. Nothing here is published or installed by an adopter.
+#
+# This file exists only for local development of this repo: the test runner and the linter.
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+# The engine's OWN tests import the vendored package from where it actually lives — no install
+# step, so they exercise the shipped shape. This line is for `tests/` alone, and nothing under
+# `examples/` may lean on it: an example is copied out of this repo, where no such path exists.
+# It quietly propped up the example's tests once, which is how they came to pass here and
+# nowhere else.
+pythonpath = ["engine/lib"]
+# `examples/` is collected too: a worked harness reaches the engine across the hook contract's
+# read surface, so an engine change that breaks a harness breaks this run — which is the only
+# place we would notice before an adopter does.
+testpaths = ["tests", "examples"]
+
+[tool.ruff]
+# The house style is ~100 columns, but E501 is deliberately not selected: prose-heavy
+# docstrings carry the design rationale here, and reflowing them buys nothing.
+line-length = 100
+
+[tool.ruff.lint]
+# Modest on purpose — the default set (E4/E7/E9/F) plus four that earn their place:
+#   I   import order, so it is settled mechanically rather than by review
+#   UP  the floor is Python 3.10; don't accrete older idioms
+#   B   real bug patterns (mutable defaults, loop-variable capture)
+#   A   builtin shadowing — makes github.py's `open=` argument an explicit `noqa: A002`
+#   BLE blind `except Exception` — makes tracker.py's deliberate total-by-contract catch
+#       an explicit `noqa: BLE001` rather than an accident
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "A", "BLE"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests bind fixtures and helpers whose names mirror the code under test.
+"tests/*" = ["A002"]
