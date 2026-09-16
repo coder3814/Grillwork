@@ -212,6 +212,72 @@ their numbers cannot collide: isolate the *build*, keep the *numbering* on the t
 
 ---
 
+## The roles
+
+Behind those commands are eight roles. They are not personas or a staffing plan — each is a
+separate agent with its own instructions, its own inputs, and a stated list of things it refuses
+to do. The shape repeats at every level: **someone authors, someone else disposes.** No role
+accepts its own work, and the reviewers are deliberately starved of context — they get the
+artifact and the standard, never the conversation that produced it, because a reviewer who has
+read the author's reasoning is no longer independent of it.
+
+```mermaid
+flowchart LR
+    YOU(["you"]) -- "/grillwork-specify" --> G["Griller"]
+    G -. "convenes" .-> DOR{{"DoR-Reviewer"}}
+
+    YOU -- "/grillwork-build" --> B["Builder"]
+    B --> ATW["Acceptance-Test Writer"]
+    B --> C["Coder"]
+    ATW -. "disposed by" .-> CR{{"Code Reviewer"}}
+    C -. "disposed by" .-> CR
+    B -. "convenes" .-> DOD{{"DoD-Reviewer"}}
+
+    YOU -- "/grillwork-curate" --> CU["Curator"]
+    CU -. "improvements.md" .-> G
+
+    classDef human fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#1f2937
+    classDef author fill:#e0e7ff,stroke:#4338ca,color:#1f2937
+    classDef reviewer fill:#fecdd3,stroke:#be123c,color:#1f2937
+    class YOU human
+    class G,B,ATW,C,CU author
+    class DOR,CR,DOD reviewer
+```
+
+**In the spec loop**
+
+| Role | What it is for | How it works |
+|---|---|---|
+| **Griller** | Turn a half-formed request into a spec that meets the Definition of Ready | Drafts the spec first and marks everything it cannot ground as a `[GAP]` marker, then interrogates you one line of inquiry at a time — each question naming the gap it closes and leading with a recommended answer — until no markers are left. It *proposes* Ready; it never declares it |
+| **DoR-Reviewer** | Decide whether a proposed-Ready spec genuinely is ready | Reads the spec and the repo in fresh context, never the grilling conversation, then runs the **derivability probe**: it attempts a full implementation decomposition, and every point where it would have to ask a question is counted as a gap in the spec rather than a limit of the reviewer. READY advances the spec; NOT READY returns findings as new markers for another grilling lap |
+
+**In the build loop**
+
+| Role | What it is for | How it works |
+|---|---|---|
+| **Builder** | Orchestrate the whole build of an approved spec | Isolates the work on its own branch and worktree, decomposes it into units, dispatches Coders, and accepts nothing until an independent reviewer has cleared it. It never writes the change itself, and a decision the spec does not ground is routed back through spec amendment rather than guessed. It proposes Done, convenes the review that disposes it, and — after you accept — merges, publishes and cleans up |
+| **Acceptance-Test Writer** | Turn the acceptance criteria into the executable gate the build must pass | Writes the suite from the spec **before any implementation exists**, and never reads the code — that blindness is the point. One black-box test per criterion, asserting an observable outcome, so the suite survives a full rewrite of the code beneath it. A criterion whose interface the spec never pinned is a grounding gap routed back through the Builder to the Griller, never an interface it invents |
+| **Coder** | Implement one unit of the change | Gets the unit, the slice of the spec it serves, and the already-reviewed acceptance suite to drive to green. It implements exactly that slice — adjacent scope is a gap to raise, not a licence — and cannot touch the acceptance suite, so it can never make the gate fit the code. A large unit may be split, at which point the Coder becomes a coordinator under the same rules |
+| **Code Reviewer** | Dispose one unit before its coordinator accepts it | A different agent than the one that wrote the unit, given the change but not the author's reasoning, returning PASS or FAIL against the spec slice with concrete findings. It also confirms the unit left the acceptance suite untouched — and when the object under review *is* the acceptance suite, it checks that every criterion has a test and that no test is coupled to implementation structure |
+| **DoD-Reviewer** | Dispose the finished change against the Definition of Done | Works in fresh context from the spec, the pinned candidate revision and an evidence bundle at a named path — never the build transcript — and hunts independently for decisions the spec does not ground rather than taking the Builder's word for it. On DONE the change becomes `verified`: proven and merge-ready, waiting on you |
+
+**Closing the loop**
+
+| Role | What it is for | How it works |
+|---|---|---|
+| **Curator** | Make the next grilling sharper than the last | Runs when a result is accepted, and on demand over everything accumulated so far. Reads the `findings.md` that builds accumulate across specs and distils them into the curated `improvements.md` the Griller consults while drafting. It curates the *pattern*, not the incident — a recurring gap-class earns an entry, one spec's quirk does not — and it changes no spec and no definition |
+
+Three habits are shared by all eight. Each opens by **checking it was actually dispatched from a
+real run** and refuses out loud when it wasn't, which is what keeps Grillwork from firing on an
+ordinary request. Each **reaps every subagent it spawned** before returning. And none of them
+accepts its own output at any depth — a Coder that splits its unit gates the pieces exactly as
+the Builder gates the Coder.
+
+Each file under [`engine/roles/`](engine/roles/) is the authority on its own role, including
+the parts summarized away here.
+
+---
+
 ## Install
 
 **Prerequisites**
