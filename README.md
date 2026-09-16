@@ -120,23 +120,30 @@ on.
 **Two commands drive the whole lifecycle**, one per half, and each runs to a decision that is
 yours. Nothing bridges them: an approved spec sits and waits until you start the build.
 
-```
-   ┌─ /grillwork-specify ──────────────────────────────────────┐
-   │                                                           │
-   │   drafting ────▶ ready ────▶ approved                     │
-   │                          ★ you approve, and the run ends  │
-   └───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph SPECIFY["/grillwork-specify"]
+        direction LR
+        drafting([drafting]) --> ready([ready])
+        ready -- "★ you approve,<br/>and the run ends" --> approved([approved])
+    end
 
-         ⋮   an approved spec waits here indefinitely.
-         ⋮   nothing starts the build except you naming it.
+    subgraph BUILD["/grillwork-build"]
+        direction LR
+        building([building]) --> verified([verified])
+        verified -- "★ you accept" --> accepted([accepted])
+        accepted -- "merges, publishes<br/>and cleans up" --> closed([closed])
+    end
 
-   ┌─ /grillwork-build ────────────────────────────────────────┐
-   │                                                           │
-   │   building ────▶ verified ────▶ accepted ────▶ closed     │
-   │                            ★ you accept, and it merges,   │
-   │                              publishes and cleans up      │
-   └───────────────────────────────────────────────────────────┘
+    SPECIFY -. "an approved spec waits here indefinitely —<br/>nothing starts the build except you naming it" .-> BUILD
+
+    classDef human fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#1f2937
+    classDef agent fill:#e0e7ff,stroke:#4338ca,color:#1f2937
+    class drafting,ready,building,verified,closed agent
+    class approved,accepted human
 ```
+
+The amber statuses are the two **you** move; the rest an agent reaches on its own.
 
 Inside `/grillwork-specify`, the Griller grills to a proposed-Ready spec and convenes the
 independent DoR review that disposes it; a NOT READY verdict is a lap inside the run, not
