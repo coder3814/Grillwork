@@ -265,17 +265,19 @@ the repo that authors it.
   **[Claude Code](https://claude.com/claude-code)**. Every gate in the method is disposed by a
   reviewer that did not do the work, so a harness that can only self-review cannot run it.
 
-**Installing.** There is nothing to install. Grillwork is text: get a copy of this repository
-and point your agent at [`INSTALL.md`](INSTALL.md) —
+**Installing.** Say this to your agent, from inside the repo you want Grillwork in:
 
 ```
-read Grillwork's INSTALL.md and install it into this repo
+install Grillwork into this repo from https://github.com/coder3814/Grillwork
 ```
 
-— and the agent writes the method into `.grillwork/` and realizes the `/grillwork-*` commands
-in whatever form your harness reads. Nothing goes on your `PATH`, no package is installed, and
-every file it writes is identical on every machine, so you commit them and a colleague's fresh
-clone has the loops without an install step.
+That is the whole thing. Grillwork is text, and the line above is an instruction to an agent
+rather than a program to run — there is nothing to clone first and nothing to have installed.
+The agent fetches this repository, follows [`INSTALL.md`](INSTALL.md), writes the method into
+`.grillwork/`, and realizes the `/grillwork-*` commands in whatever form your harness reads.
+Nothing goes on your `PATH`, no package is installed, and every file it writes is identical on
+every machine, so you commit them and a colleague's fresh clone has the loops without an install
+step.
 
 Updating is one command — `/grillwork-upgrade`, with nothing after it. The repo records where
 its Grillwork came from and how its commands were realized, so the command fetches that source

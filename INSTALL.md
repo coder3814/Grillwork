@@ -1,8 +1,14 @@
 # Install Grillwork
 
-**This file is a prompt.** Point your coding agent at it — "read Grillwork's INSTALL.md and
-install it here" — and the agent does the work. There is no installer program, nothing to
-`pip install`, and nothing to put on your `PATH`.
+**This file is a prompt.** Say it to your coding agent, from inside the repo you want it in —
+
+```
+install Grillwork into this repo from https://github.com/coder3814/Grillwork
+```
+
+— and the agent does the rest. There is no installer program, nothing to `pip install`, and
+nothing to put on your `PATH`. You do not need a copy of Grillwork first; fetching it is the
+agent's first step.
 
 You are the agent reading this. What follows is your instruction.
 
@@ -62,6 +68,29 @@ stop and say so, naming what's missing:
 - **git.** Not incidental: the method isolates every build on its own branch *and its own
   worktree*, and merges on acceptance. A repo not under git can hold the specs but cannot run the
   development loop.
+
+## Get the source
+
+You were most likely given a URL and nothing else. Fetch Grillwork yourself — with your own
+tools, because none of Grillwork's exist yet in this repo:
+
+- **Download the archive** at `<repo>/archive/<ref>.zip` — `main` unless the person named a
+  branch, tag or commit — and extract it. The generic archive form resolves all three alike.
+- **Or clone it** somewhere outside the target repo, if that is easier for you.
+
+Either way, put it in a temporary directory **outside the repository you are installing into**,
+and **delete it when you are done**. It is scaffolding, not part of the install: everything that
+matters ends up committed inside the target repo, and a stray checkout sitting next to it is
+a second copy that will rot and mislead whoever finds it.
+
+Then check what you got. It should hold `engine/` and this file at its top level; a GitHub
+archive wraps both in a single `Grillwork-<ref>/` directory. If it doesn't, you have the wrong
+thing — say so rather than copying it in.
+
+**Remember the URL.** It is the one thing only this moment knows, and "Write the settings"
+below records it so that updating later needs no argument. If the person pointed you at a
+local checkout instead of a URL, use that checkout as the source and read its `origin` remote
+for the URL to record.
 
 ## What to write
 
@@ -243,13 +272,12 @@ determine from the repo, and offer what you found as the default:
 - **`gate`** — the command that proves existing behavior still works, e.g. `pytest` or
   `npm test`. Look for it in the repo before asking; leave empty if there genuinely isn't one.
 - **`integration_target`** — the branch a finished change lands on. Usually the default branch.
-- **`source`** — where this install came from, so an update needs no argument. Write the repo
-  you are installing *from* and the ref you are on; if you were pointed at a local checkout,
-  write that checkout's `origin` remote rather than its path, because a path on your machine
-  is exactly the kind of thing that must not end up in a committed file. Leave the section out
-  and the update falls back to the canonical repo above, which is right far more often than it
-  is wrong — but record it when you know it, because a fork that omits it silently updates
-  itself from upstream.
+- **`source`** — where this install came from, so an update needs no argument. Write the URL you
+  were given in "Get the source", and the ref you fetched. Never write a path on your machine:
+  that is exactly the kind of thing that must not end up in a committed file, and it is why a
+  local checkout contributes its `origin` remote instead. Leave the section out and the update
+  falls back to the canonical repo above, which is right far more often than it is wrong — but
+  record it when you know it, and you do know it, because the person just told you.
 
 Two optional sections, both documented in `hooks-contract.md` and `harness-guide.md`. Leave
 them out unless the person asks:
