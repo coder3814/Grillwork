@@ -9,7 +9,7 @@
 
 **Definition-bounded loops · Adversarial review at every gate · Falsifiable evidence · Two human touchpoints · A grilling that learns**
 
-[Why Grillwork](#the-problem) · [How it works](#the-core-model) · [The lifecycle](#the-lifecycle) · [Install](#install) · [Quickstart](#quickstart) · [Commands](#the-lifecycle)
+[The problem](#the-problem) · [The core model](#the-core-model) · [The lifecycle](#the-lifecycle) · [The roles](#the-roles) · [Install](#install) · [Quickstart](#quickstart) · [The three concerns](#the-method-vs-the-three-concerns) · [How it's delivered](#how-its-delivered) · [What it does end to end](#what-it-does-end-to-end) · [Status & roadmap](#status--roadmap) · [Development](#development) · [Explore the system](#explore-the-system) · [Glossary](#glossary) · [License](#license)
 
 Grillwork is the method and its engine: **definition-bounded loops** that grill a request
 into a proven spec and build it to a proven Done, **independent adversarial review** at
