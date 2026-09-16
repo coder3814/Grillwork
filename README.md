@@ -278,11 +278,11 @@ every file it writes is identical on every machine, so you commit them and a col
 clone has the loops without an install step.
 
 Updating is one command — `/grillwork-upgrade`, with nothing after it. The repo records where
-its Grillwork came from, so the command fetches that source itself, replaces the method
-wholesale, and leaves your specs, findings, and settings alone. It insists on a clean git tree
-and keeps no backup of what it replaced, because git is the undo; what you get back is an
-uncommitted diff to review. Re-running the install prompt by hand does the same thing and
-always has — the command only saves you finding the source first.
+its Grillwork came from and how its commands were realized, so the command fetches that source
+itself, replaces the method, rewrites the `/grillwork-*` files, and deletes any the new version
+no longer has. Your specs, findings, and settings are left alone, and nothing it downloaded
+survives it. It insists on a clean git tree and keeps no backup of what it replaced, because git
+is the undo; what you get back is an uncommitted diff to review.
 
 ## Quickstart
 

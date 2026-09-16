@@ -14,11 +14,14 @@ import contextlib
 import io
 import json
 import shutil
+import subprocess
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from grillwork import cli
+from grillwork import cli, realize
 
 
 @dataclass(frozen=True)
@@ -97,3 +100,89 @@ def write_config(root: Path, config: dict) -> Path:
 def installed(tmp_path: Path) -> Path:
     """A tmp repo with Grillwork installed at its defaults."""
     return install(tmp_path)
+
+
+# --------------------------------------------------------------------------------------
+# Updating an install. Shared because the realization tests and the fetch tests drive the
+# same command from opposite ends.
+# --------------------------------------------------------------------------------------
+
+# The profile a Claude Code install writes. Nothing in the engine knows these values; they are
+# the adopter's record of how their own install realized the commands.
+CLAUDE_PROFILE = {
+    "format": "yaml-frontmatter",
+    "argument_placeholder": "$ARGUMENTS",
+    "banner": "<!-- {text} -->",
+    "extension": ".md",
+    "targets": {"command": ".claude/commands", "subagent": ".claude/agents"},
+}
+
+
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+def commit(root: Path, message: str = "install") -> None:
+    git(root, "add", "-A")
+    subprocess.run(
+        [
+            "git", "-C", str(root),
+            "-c", "user.email=test@example.com",
+            "-c", "user.name=Test",
+            "commit", "-qm", message,
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def source_archive(
+    tmp_path: Path, engine_src: Path | None = None, wrapper: str = "Grillwork-main"
+) -> Path:
+    """Build a zip shaped like a GitHub source archive: one wrapper directory holding the
+    engine and the install prompt.
+
+    ``engine_src`` defaults to this repo's own ``engine/`` — the real thing, commands and all,
+    so the realization is exercised against the files an adopter actually receives.
+    """
+    engine_src = ENGINE if engine_src is None else engine_src
+    staging = tmp_path / "archive-src" / wrapper
+    shutil.copytree(engine_src, staging / "engine", ignore=shutil.ignore_patterns("__pycache__"))
+    (staging / "INSTALL.md").write_text("# Install Grillwork\n", encoding="utf-8")
+    zip_path = tmp_path / "source.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for p in staging.rglob("*"):
+            if p.is_file():
+                zf.write(p, p.relative_to(staging.parent).as_posix())
+    return zip_path
+
+
+def update(root: Path, archive: Path) -> dict:
+    """Run the update and return its JSON, asserting it succeeded."""
+    result = run(["update", "--archive", str(archive), str(root)])
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout)
+
+
+@pytest.fixture(autouse=True)
+def no_staging_left_behind():
+    """An update must leave nothing in the temp directory, on success or failure alike — the
+    whole reason the download is deleted in a `finally`. Asserted around every test rather than
+    in one, so no future path can quietly start leaking."""
+    before = set(Path(tempfile.gettempdir()).glob("grillwork-update-*"))
+    yield
+    leaked = set(Path(tempfile.gettempdir()).glob("grillwork-update-*")) - before
+    assert not leaked, f"staging left behind: {sorted(leaked)}"
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """An installed, committed repo with a realization profile — the ordinary starting state
+    of an update."""
+    root = install(tmp_path / "repo")
+    (root / ".grillwork" / "settings" / realize.PROFILE_FILENAME).write_text(
+        json.dumps(CLAUDE_PROFILE, indent=2) + "\n", encoding="utf-8"
+    )
+    git(root, "init", "-q")
+    commit(root)
+    return root

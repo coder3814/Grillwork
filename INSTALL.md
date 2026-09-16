@@ -70,20 +70,23 @@ identical on every machine — no absolute paths, no usernames, nothing machine-
 is deliberate: the person is going to commit these files, and their colleague's fresh clone
 has to work unchanged.
 
-**Copy `engine/` to `.grillwork/engine/`, with one exception.** That is the whole rule. What
-you are copying:
+**Copy `engine/` to `.grillwork/engine/`.** That is the whole rule. What you are copying:
 
 | | What it is |
 |---|---|
 | `roles/` | The eight roles — the method itself |
 | `definitions/` | The Definition of Done and the Definition of Ready |
+| `commands/` | The command and subagent sources (see below) |
 | `spec-template.md` | The spec every grilling fills in |
 | `hooks-contract.md` | The lifecycle events and their payloads |
 | `harness-guide.md` | How to wire hooks at the repo's edge |
 | `lib/` | The deterministic helper (see below) |
 
-**The exception is `engine/commands/`**, which does *not* get copied verbatim — it is realized
-into your harness's own layout instead. See "Realize the commands" below.
+**`commands/` is copied like everything else *and* realized on top of that.** The copy is the
+source the realization reads — including every later update's, which is what lets an update
+delete its download the moment it has placed it. Copying it is not a substitute for realizing
+it: files sitting in `.grillwork/engine/commands/` are inert, and a harness will never find
+them there. See "Realize the commands" below.
 
 Copy **wholesale**: replace the directory, never merge it file-by-file. A half-updated engine,
 where one role is new and another is old, is the failure mode this instruction exists to
@@ -145,6 +148,45 @@ judgment" cannot mean "the output varies." Exactly this, and nothing else:
 Prefix everything you write with `grillwork-`. That prefix is reserved, so your files sit next
 to the person's own commands without colliding, and so removing Grillwork later is obvious
 rather than archaeological.
+
+## Write down how you realized them
+
+You have just made a handful of decisions only an agent running in this harness could make:
+where each kind of file goes, what the argument placeholder is, how this format spells a
+comment. **Record them**, in `.grillwork/settings/realization.json`, so an update can repeat
+the realization mechanically instead of asking another agent to derive it again:
+
+```json
+{
+  "format": "yaml-frontmatter",
+  "argument_placeholder": "$ARGUMENTS",
+  "banner": "<!-- {text} -->",
+  "extension": ".md",
+  "targets": {
+    "command": ".claude/commands",
+    "subagent": ".claude/agents"
+  },
+  "keys": {}
+}
+```
+
+Those values are Claude Code's, shown to make the shape concrete. Write **yours**:
+
+- **`targets`** — one repo-relative directory per `kind:`, which is what that key was for.
+- **`argument_placeholder`** — what you substituted for `{{ARGS}}`.
+- **`banner`** — a one-line comment template containing `{text}`, used for both banner lines.
+- **`extension`** — the realized files' extension, dot included.
+- **`keys`** — a source frontmatter key mapped to the name your harness spells it with, for
+  example `{"tools": "allowed-tools"}`. Leave it empty when they match; anything unlisted is
+  carried through as written.
+
+**Write the profile only if it describes what you actually did.** `format` has one value that
+can be replayed — `yaml-frontmatter`, meaning markdown with a `---`-fenced YAML header. If your
+harness takes TOML, JSON, or bare files with no frontmatter at all, there is nothing honest to
+record yet: leave the file out, say so when you report, and updates will hand the realization
+back to an agent rather than write the wrong format and call it done.
+
+This file is the **adopter's**, like `config.json`. An update reads it and never rewrites it.
 
 ## Grillwork is invoked, never ambient
 
@@ -243,83 +285,91 @@ everything you wrote is meant to be committed.
 
 ## Updating an existing install
 
-Running this prompt again is safe and is how the method is updated. An update is the same
-writing as a fresh install with one section removed and one step added, and it **asks the
-person nothing**.
-
-**You are most likely reading a staged copy.** `/grillwork-upgrade` runs
+**An update is one command, and it is not this file.** From the repo:
 
 ```bash
-python .grillwork/engine/lib/grillwork fetch-engine
+python .grillwork/engine/lib/grillwork update
 ```
 
-which reads the `source` recorded in the repo's settings, refuses unless the git working tree
-is clean — an update keeps no backup, because git is the undo — downloads that source's
-archive, and extracts it to a temp directory outside the repo. The JSON it prints names the
-staged `engine/` you copy from and the `install_doc` you are reading now, and reports
-`current: true` when the installed engine is already identical to it — line endings aside,
-because a downloaded archive ships LF where a Windows checkout may hold CRLF — in which case
-there is nothing to do and the right answer is to say so and stop. When the update is finished,
-delete the `staged` directory the JSON names; nothing else will.
+That does the whole thing: it reads the `source` recorded in the settings, refuses unless the
+git working tree is clean, downloads that source, replaces `.grillwork/engine/` wholesale,
+re-realizes every command from the profile the install recorded, sweeps any `grillwork-*` file
+the current version no longer has, and deletes everything it downloaded. It asks nothing,
+because the answers are already in the repo. What it leaves behind is an uncommitted diff.
 
-That is the whole reason the fetch is a separate step: it stages, and nothing more. It never
-writes into `.grillwork/`. The four steps below are still yours, and they are read from the
-engine being updated *to* rather than from the one being updated away from.
+Read the JSON it prints and report it: `origin` says where it fetched from, `engine_changed`
+lists the engine files that differed — empty means the repo was already current and nothing in
+the engine changed — and `written` / `removed` list the realized commands rewritten and the
+retired ones swept.
 
-If there is no staged copy — you were pointed at a checkout directly — nothing changes. Copy
-from that checkout instead; the four steps are the same.
+The command lives in the engine, so the version that runs is always the one being updated
+*away from*. That is deliberate and safe: it copies the new engine into place before it does
+anything clever, and the realization it performs is driven by the profile in the repo, not by
+anything either version hard-codes.
 
-**Do exactly four things:**
+### When the update says `realized: false`
 
-1. **Replace `.grillwork/engine/` wholesale** — the same copy described in "What to write",
-   directory-for-directory rather than file-by-file.
-2. **Re-realize every command**, exactly as "Realize the commands" describes. They carry a
-   do-not-edit banner precisely so that this overwrite is safe.
-3. **Sweep the orphans.** Delete any `grillwork-*` command or subagent file you did **not** just
-   write. The prefix is reserved, so anything else wearing it is a file from an older version
-   that the current one no longer has — a command since removed, or one renamed. Nothing else
-   deletes these: step 2 only overwrites the names it knows, so without this step a retired
-   command survives every future update, still offering itself to any agent that reads its
-   description. Say what you removed.
-4. **Touch nothing else.** In particular, do not open `settings/config.json` to check it, and do
-   not ask about anything in it.
+The engine was replaced, but the commands were not, because the repo has no
+`settings/realization.json` — it predates the profile, or its harness could not be described by
+one. Finish by hand: realize the commands exactly as "Realize the commands" above describes,
+reading from `.grillwork/engine/commands/`, which the update just placed. Then delete any
+`grillwork-*` file you did not write — nothing else removes these, so a retired command
+otherwise survives every future update, still offering itself to any agent that reads its
+description. Say what you removed. Finally, write the profile as "Write down how you realized
+them" describes, so the next update needs none of this.
 
-**The one exception, for installs old enough to need it:** if the settings are a
-`config.yaml` rather than a `config.json`, that is an install from a Grillwork that used YAML.
-Convert it — carry every setting across unchanged, write `config.json`, delete the old file —
-and still ask nothing. You are transcribing their existing answers into the format the helper
-now reads, not collecting them again. Say that you converted it.
+### Doing it by hand
 
-**What an update must leave exactly as it found it**: `settings/config.json`, the curated
-`settings/improvements.md`, and every spec under the spec home with its findings and evidence.
-Those are the person's and the loops' — written by the runtime, never by an install. If you
-find yourself about to ask which branch changes land on, or what the test command is, you have
-taken the fresh-install branch by mistake.
+An update run by an agent from a checkout rather than by the command is the same four steps,
+and they are worth naming because the command performs exactly these:
+
+1. **Replace `.grillwork/engine/` wholesale**, directory-for-directory rather than
+   file-by-file. A half-updated engine, one role new and another old, is the failure this
+   prevents.
+2. **Re-realize every command.** They carry a do-not-edit banner precisely so this overwrite
+   is safe.
+3. **Sweep the orphans** — every `grillwork-*` file you did not just write.
+4. **Touch nothing else.** In particular, do not open `settings/config.json` to check it, and
+   do not ask about anything in it.
+
+**What an update must leave exactly as it found it**: `settings/config.json`,
+`settings/realization.json`, the curated `settings/improvements.md`, and every spec under the
+spec home with its findings and evidence. Those are the person's and the loops' — written by
+the runtime, never by an install. If you find yourself about to ask which branch changes land
+on, or what the test command is, you have taken the fresh-install branch by mistake.
+
+**The one exception, for installs old enough to need it:** if the settings are a `config.yaml`
+rather than a `config.json`, that is an install from a Grillwork that used YAML. Convert it —
+carry every setting across unchanged, write `config.json`, delete the old file — and still ask
+nothing. You are transcribing their existing answers into the format the helper now reads, not
+collecting them again. Say that you converted it.
 
 ### Checking whether a repo is current
 
 Because everything installed is committed and byte-identical to its source, **checking whether
 a repo is current is a plain directory comparison** —
-`diff -r engine/ <repo>/.grillwork/engine/ --exclude=commands --exclude=__pycache__`, ignoring
-`commands/`, which is realized rather than copied, and the generated bytecode, which was never
-installed in the first place. There is no version handshake and
-nothing to interrogate; what is installed is what is in git. `fetch-engine` runs exactly that
-comparison against what it just downloaded and reports it as `current` and `differing`, so the
-check needs no checkout on disk. **Leave alone everything the person
-or the loops produced**: their specs and the findings beside them, their `config.json`, and the
-curated `improvements.md` under `.grillwork/settings/`. Those are theirs; the engine is not.
+`diff -r engine/ <repo>/.grillwork/engine/ --exclude=__pycache__`, ignoring only the generated
+bytecode, which was never installed in the first place. There is no version handshake and
+nothing to interrogate; what is installed is what is in git. The `update` command runs exactly
+that comparison against what it downloaded and prints it as `engine_changed`, so the check
+needs no checkout on disk — and it normalizes line endings, because an archive ships LF where a
+Windows checkout may hold CRLF and a byte comparison would call every file changed. **Leave
+alone everything the person or the loops produced**: their specs and the findings beside them,
+their `config.json`, and the curated `improvements.md` under `.grillwork/settings/`. Those are
+theirs; the engine is not.
 
 ## Updating from a version that has no `/grillwork-upgrade`
 
-There is nothing special to do, and nothing to install first. `/grillwork-upgrade` only fetches
-the source and hands you back to this file; the update path above is the real mechanism, and it
-has always been reachable the same way the original install was — **point the agent at this file
-and say the repo already has Grillwork.** The shortcut's absence costs you one sentence of
-typing, not a capability.
+An install old enough to have neither the `/grillwork-upgrade` command nor the `update`
+subcommand cannot update itself, because both live in the engine it is trying to replace. The
+way out is the way in: **point the agent at this file and say the repo already has Grillwork.**
+It performs "Doing it by hand" above, and the install it leaves behind has the command, so this
+is the last time anyone has to.
 
-An install predating the `source` setting is likewise fine: with no source recorded, the fetch
-falls back to the canonical repository and says which one it used. **Do not write the setting
-in on its behalf** — `config.json` is the person's, and an update does not edit it.
+An install that predates the `source` setting but has the `update` subcommand is fine as it is:
+with no source recorded, the fetch falls back to the canonical repository and says which one it
+used. **Do not write the setting in on its behalf** — `config.json` is the person's, and an
+update does not edit it.
 
 Two leftovers appear only in installs old enough to predate the current shape. Neither is
 deleted by the update path, because neither is something an install ever wrote:

@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import config, evidence, hooks, naming, package, source, spec
+from . import config, evidence, hooks, naming, package, realize, source, spec
 
 # Every error kind a command can expect to hit: a bad/absent config, the filesystem, and the
 # domain's own rejections (`naming.set_status` raises ValueError on an unknown status). One
@@ -207,39 +208,52 @@ def _cmd_markers(args: argparse.Namespace) -> None:
         )
 
 
-def _cmd_fetch_engine(args: argparse.Namespace) -> None:
-    """Download the recorded source and stage it for the update prompt to read.
+def _cmd_update(args: argparse.Namespace) -> None:
+    """Update this repo's Grillwork from the source it records: fetch, replace, realize, sweep.
 
-    This writes nothing into `.grillwork/`. It answers the two questions an update could not
-    answer for itself — where the source is, and whether the repo is already current — and
-    leaves the replacing to the `INSTALL.md` it just staged, which is the version that knows
-    what its own update involves.
+    The whole update, in one call. The download is extracted to a temp directory and deleted in
+    a `finally`, so nothing it fetched outlives it either way; what is left behind is an
+    uncommitted diff for the person to review, which is why a clean tree is required first.
+
+    The commands are realized from the copy just placed under `.grillwork/engine/commands/`,
+    not from the download — that ordering is what lets the download go immediately. Without a
+    realization profile there is nothing to realize them *by*; the engine is still replaced,
+    `realized` comes back false, and finishing the job falls to the agent that ran this.
     """
     with _clean_exit():
         cfg = config.load(args.path)
         source.require_clean_tree(cfg.root)
-        repo = args.repo or cfg.source_repo
-        ref = args.ref or cfg.source_ref
-        archive = Path(args.archive) if args.archive else None
-        staging, src, origin = source.fetch(repo, ref, archive)
-        differing = source.compare_engines(
-            cfg.root / ".grillwork" / "engine", src / "engine"
+        installed = cfg.root / ".grillwork" / "engine"
+        staging, src, origin = source.fetch(
+            args.repo or cfg.source_repo,
+            args.ref or cfg.source_ref,
+            Path(args.archive) if args.archive else None,
         )
-        _emit(
-            {
-                "origin": origin,
-                "repo": repo,
-                "ref": ref,
-                # `staged` is the whole temp directory — delete it when the update is done.
-                # `source` is the Grillwork tree inside it that the update copies from.
-                "staged": str(staging),
-                "source": str(src),
-                "engine": str(src / "engine"),
-                "install_doc": str(src / "INSTALL.md"),
-                "current": not differing,
-                "differing": differing,
-            }
-        )
+        try:
+            changed = source.compare_engines(installed, src / "engine")
+            source.replace_engine(src / "engine", installed)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+        result = {
+            "origin": origin,
+            "engine_changed": changed,
+            "realized": False,
+            "written": [],
+            "removed": [],
+        }
+        try:
+            profile = realize.load_profile(cfg.root)
+        except realize.ProfileError as e:
+            # Not a failure: the engine is updated, and the commands need the agent instead.
+            print(f"Commands not realized: {e}", file=sys.stderr)
+        else:
+            written = realize.realize_all(installed / "commands", cfg.root, profile)
+            removed = realize.sweep_orphans(cfg.root, profile, written)
+            result["realized"] = True
+            result["written"] = [str(p) for p in written]
+            result["removed"] = [str(p) for p in removed]
+        _emit(result)
 
 
 def _cmd_fire_hooks(args: argparse.Namespace) -> None:
@@ -342,9 +356,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = add(
-        "fetch-engine",
-        _cmd_fetch_engine,
-        "Download this install's source and stage it for an update; report whether it differs.",
+        "update",
+        _cmd_update,
+        "Update this repo's Grillwork from its recorded source: fetch, replace, realize, sweep.",
     )
     sub.add_argument("--repo", default=None, help="Override the source repository URL.")
     sub.add_argument("--ref", default=None, help="Override the branch, tag or commit to fetch.")

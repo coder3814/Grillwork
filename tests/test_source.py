@@ -1,75 +1,28 @@
-"""Fetching and staging the engine an update is updating to.
+"""Updating an install from the source it records.
 
-The network is never touched here: `fetch-engine --archive` reads a local zip, which is the
-same path an offline adopter takes, so the download is the only untested line and every check
-around it — the shape of the archive, the clean-tree refusal, the currency comparison — is
-exercised against real files.
+The network is never touched here: `update --archive` reads a local zip, which is the same
+path an offline machine takes, so the download is the only untested line and everything around
+it — the shape of the archive, the clean-tree refusal, the replacement, the realization, the
+orphan sweep, and the promise that nothing is left in the temp directory — is exercised against
+real files.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
-import tempfile
 import zipfile
-from pathlib import Path
 
 import pytest
-from conftest import ENGINE, install, run, write_config
+from conftest import (
+    ENGINE,
+    commit,
+    install,
+    run,
+    source_archive,
+    update,
+    write_config,
+)
 from grillwork import config, source
-
-
-def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
-
-
-def _commit_all(root: Path) -> None:
-    """Make ``root`` a git repo with a clean tree — the state an update requires."""
-    _git(root, "init", "-q")
-    _git(root, "config", "user.email", "test@example.com")
-    _git(root, "config", "user.name", "Test")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "install")
-
-
-def _archive(tmp_path: Path, engine_src: Path | None = None, wrapper: str = "Grillwork-main") -> Path:
-    """Build a zip shaped like a GitHub source archive: one wrapper directory holding the
-    engine and the install prompt.
-
-    ``engine_src`` defaults to this repo's own ``engine/``. The currency tests pass the
-    *installed* engine instead, because the test fixture installs only the subset the helper
-    reads — a difference of the fixture's making, not the kind of drift being asserted on.
-    """
-    engine_src = ENGINE if engine_src is None else engine_src
-    staging = tmp_path / "archive-src" / wrapper
-    shutil.copytree(engine_src, staging / "engine")
-    (staging / "INSTALL.md").write_text("# Install Grillwork\n", encoding="utf-8")
-    zip_path = tmp_path / "source.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for p in staging.rglob("*"):
-            if p.is_file():
-                zf.write(p, p.relative_to(staging.parent).as_posix())
-    return zip_path
-
-
-@pytest.fixture(autouse=True)
-def _sweep_staging():
-    """Staging deliberately outlives the fetch — the update copies from it — so the test suite
-    sweeps what it created rather than leaving a temp directory per assertion."""
-    before = set(Path(tempfile.gettempdir()).glob("grillwork-update-*"))
-    yield
-    for leftover in set(Path(tempfile.gettempdir()).glob("grillwork-update-*")) - before:
-        shutil.rmtree(leftover, ignore_errors=True)
-
-
-@pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    """An installed, committed repo — the starting state of every update."""
-    root = install(tmp_path / "repo")
-    _commit_all(root)
-    return root
-
 
 # --------------------------------------------------------------------------------------
 # The recorded source
@@ -93,9 +46,8 @@ def test_recorded_source_round_trips(tmp_path):
 def test_config_command_reports_the_source(repo):
     # Reported rather than assumed: an adopter who installed from a fork can see which source
     # an update would reach for.
-    result = run(["config", str(repo)])
-    assert result.exit_code == 0
-    assert json.loads(result.stdout)["source_repo"] == source.DEFAULT_REPO
+    payload = json.loads(run(["config", str(repo)]).stdout)
+    assert payload["source_repo"] == source.DEFAULT_REPO
 
 
 # --------------------------------------------------------------------------------------
@@ -137,93 +89,88 @@ def test_archive_url_refuses_a_shell_shaped_ref():
 # --------------------------------------------------------------------------------------
 
 
-def test_fetch_refuses_a_dirty_tree(repo, tmp_path):
+def test_update_refuses_a_dirty_tree(repo, tmp_path):
     (repo / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
-    result = run(["fetch-engine", "--archive", str(_archive(tmp_path)), str(repo)])
+    result = run(["update", "--archive", str(source_archive(tmp_path)), str(repo)])
     assert result.exit_code == 1
     assert "not clean" in result.output
+    # Refused before anything was replaced.
+    assert not (repo / ".claude").exists()
 
 
-def test_fetch_refuses_outside_git(tmp_path):
+def test_update_refuses_outside_git(tmp_path):
     root = install(tmp_path / "nogit")
-    result = run(["fetch-engine", "--archive", str(_archive(tmp_path)), str(root)])
+    result = run(["update", "--archive", str(source_archive(tmp_path)), str(root)])
     assert result.exit_code == 1
     assert "git is the undo" in result.output
 
 
 # --------------------------------------------------------------------------------------
-# Staging
+# The update itself
 # --------------------------------------------------------------------------------------
 
 
-def test_fetch_stages_the_source_outside_the_repo(repo, tmp_path):
-    result = run(["fetch-engine", "--archive", str(_archive(tmp_path)), str(repo)])
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-
-    staged = Path(payload["staged"])
-    assert Path(payload["engine"]).is_dir()
-    assert Path(payload["install_doc"]).is_file()
-    # `staged` is the whole of what was created, so naming it is enough to clean up after.
-    assert Path(payload["source"]).is_relative_to(staged)
-    # Outside the repo, so a staged update can never be committed by accident.
-    assert repo not in staged.parents and staged != repo
-    # Nothing under .grillwork/ was touched: staging is all this command does.
-    assert not (repo / ".grillwork" / "engine" / "commands").exists()
-
-
-def test_fetch_reports_current_when_the_engine_matches(repo, tmp_path):
-    # An archive byte-identical to what is installed: there is nothing for an update to do.
-    archive = _archive(tmp_path, repo / ".grillwork" / "engine")
-    result = run(["fetch-engine", "--archive", str(archive), str(repo)])
-    payload = json.loads(result.stdout)
-    assert payload["current"] is True
-    assert payload["differing"] == []
-
-
-def test_fetch_reports_what_differs(repo, tmp_path):
+def test_update_replaces_the_engine_in_place(repo, tmp_path):
+    archive = source_archive(tmp_path)
     (repo / ".grillwork" / "engine" / "roles" / "griller.md").write_text("stale\n", encoding="utf-8")
-    _git(repo, "commit", "-qam", "drift")
-    result = run(["fetch-engine", "--archive", str(_archive(tmp_path)), str(repo)])
-    payload = json.loads(result.stdout)
-    assert payload["current"] is False
-    assert "roles/griller.md" in payload["differing"]
+    commit(repo, "drift")
+
+    payload = update(repo, archive)
+
+    assert "roles/griller.md" in payload["engine_changed"]
+    installed = repo / ".grillwork" / "engine" / "roles" / "griller.md"
+    assert installed.read_text(encoding="utf-8") == (
+        (ENGINE / "roles" / "griller.md").read_text(encoding="utf-8")
+    )
 
 
-def test_currency_ignores_realized_commands_and_bytecode(repo, tmp_path):
-    # `commands/` is realized into the harness's layout rather than copied, and bytecode was
-    # never installed — neither is drift, and reporting them would make every repo look stale.
-    engine = repo / ".grillwork" / "engine"
-    archive = _archive(tmp_path, engine)
-    (engine / "commands").mkdir()
-    (engine / "commands" / "grillwork-specify.md").write_text("realized\n", encoding="utf-8")
-    (engine / "roles" / "__pycache__").mkdir()
-    (engine / "roles" / "__pycache__" / "x.pyc").write_bytes(b"\x00")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "realized")
-
-    payload = json.loads(run(["fetch-engine", "--archive", str(archive), str(repo)]).stdout)
-    assert payload["current"] is True
+def test_update_carries_the_command_sources_into_the_install(repo, tmp_path):
+    # Realizing happens from the placed copy, not from the download — which is what lets the
+    # download be deleted the moment it has been placed.
+    update(repo, source_archive(tmp_path))
+    placed = repo / ".grillwork" / "engine" / "commands"
+    assert sorted(p.name for p in placed.glob("*.md")) == sorted(
+        p.name for p in (ENGINE / "commands").glob("*.md")
+    )
 
 
-def test_fetch_refuses_an_archive_that_is_not_grillwork(repo, tmp_path):
+def test_update_reports_no_change_when_already_current(repo, tmp_path):
+    archive = source_archive(tmp_path, repo / ".grillwork" / "engine")
+    assert update(repo, archive)["engine_changed"] == []
+
+
+def test_update_leaves_instance_data_alone(repo, tmp_path):
+    settings = repo / ".grillwork" / "settings"
+    (settings / "improvements.md").write_text("# curated\n", encoding="utf-8")
+    specs = repo / ".grillwork" / "specs"
+    specs.mkdir(parents=True, exist_ok=True)
+    (specs / "001-thing.md").write_text("a spec\n", encoding="utf-8")
+    before = (settings / "config.json").read_text(encoding="utf-8")
+    commit(repo, "instance data")
+
+    update(repo, source_archive(tmp_path))
+
+    assert (settings / "config.json").read_text(encoding="utf-8") == before
+    assert (settings / "improvements.md").read_text(encoding="utf-8") == "# curated\n"
+    assert (specs / "001-thing.md").read_text(encoding="utf-8") == "a spec\n"
+
+
+def test_update_refuses_an_archive_that_is_not_grillwork(repo, tmp_path):
     bogus = tmp_path / "bogus.zip"
     with zipfile.ZipFile(bogus, "w") as zf:
         zf.writestr("something/readme.txt", "not grillwork")
-    result = run(["fetch-engine", "--archive", str(bogus), str(repo)])
+    result = run(["update", "--archive", str(bogus), str(repo)])
     assert result.exit_code == 1
     assert "does not look like a Grillwork source" in result.output
 
 
-def test_fetch_refuses_a_missing_archive(repo, tmp_path):
-    result = run(["fetch-engine", "--archive", str(tmp_path / "absent.zip"), str(repo)])
+def test_update_refuses_a_missing_archive(repo, tmp_path):
+    result = run(["update", "--archive", str(tmp_path / "absent.zip"), str(repo)])
     assert result.exit_code == 1
     assert "No such archive" in result.output
 
 
-def test_overrides_beat_the_recorded_source(repo, tmp_path):
-    # `--ref` without `--archive` would download; assert the resolution instead, which is what
-    # the override exists to change.
+def test_overrides_beat_the_recorded_source(repo):
     write_config(
         repo,
         {
@@ -232,22 +179,20 @@ def test_overrides_beat_the_recorded_source(repo, tmp_path):
             "source": {"repo": "https://example.com/team/fork", "ref": "v2"},
         },
     )
-    _git(repo, "commit", "-qam", "source")
-    payload = json.loads(run(["fetch-engine", "--archive", str(_archive(tmp_path)), str(repo)]).stdout)
-    assert (payload["repo"], payload["ref"]) == ("https://example.com/team/fork", "v2")
+    cfg = config.load(repo)
+    assert (cfg.source_repo, cfg.source_ref) == ("https://example.com/team/fork", "v2")
 
 
 def test_currency_survives_line_ending_differences(repo, tmp_path):
     # A GitHub archive ships LF; a Windows checkout with core.autocrlf on holds the same
-    # content as CRLF. Byte-comparing those calls every file drift and the "already current,
-    # stop" answer never fires — so the comparison normalizes, as git does.
+    # content as CRLF. Byte-comparing those reports every file as changed, which would make
+    # the summary useless for seeing what an update actually did.
     engine = repo / ".grillwork" / "engine"
-    archive = _archive(tmp_path, engine)
+    archive = source_archive(tmp_path, engine)
     for path in engine.rglob("*.md"):
         lf = path.read_bytes().replace(b"\r\n", b"\n")
         path.write_bytes(lf.replace(b"\n", b"\r\n"))
-    # No commit: with autocrlf on, git normalizes these back and sees no change at all,
-    # which is exactly the point — the drift is in the bytes on disk, not in the history.
+    # No commit: with autocrlf on, git normalizes these back and sees no change at all, which
+    # is exactly the point — the difference is in the bytes on disk, not in the history.
 
-    payload = json.loads(run(["fetch-engine", "--archive", str(archive), str(repo)]).stdout)
-    assert payload["current"] is True
+    assert update(repo, archive)["engine_changed"] == []
